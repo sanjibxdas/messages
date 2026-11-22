@@ -84,7 +84,12 @@ jobs:
         run: python3 .github/scripts/prepare_android.py appconfig
 
       - name: Generate native Android project (expo eject)
-        run: npx --yes expo-cli@3.28.6 eject --non-interactive --no-install
+        run: |
+          # expo-cli 3.x is the only CLI version that can eject an SDK 39 app;
+          # it is installed globally because the local `expo` bin only proxies
+          # to it and npx resolves the modern CLI instead.
+          npm install --global expo-cli@3.28.6 --silent
+          expo eject --non-interactive --no-install
 
       - name: Patch generated project (arm64 only, no OTA)
         run: python3 .github/scripts/prepare_android.py native
