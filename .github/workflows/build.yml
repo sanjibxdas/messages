@@ -101,6 +101,17 @@ jobs:
       - name: Install dependencies for bare project
         run: yarn install --ignore-engines --network-timeout 600000
 
+      # AGP 3.5.3 picks an NDK from $ANDROID_HOME/ndk without honouring a
+      # version request, so remove the newer ones and pin r21e explicitly.
+      - name: Pin NDK r21e
+        run: |
+          for v in $(ls "$ANDROID_HOME/ndk" | grep -v '^21\.4\.7075529$'); do
+            echo "removing newer NDK $v"
+            sudo rm -rf "$ANDROID_HOME/ndk/$v"
+          done
+          printf 'sdk.dir=%s\nndk.dir=%s\n' "$ANDROID_HOME" "$ANDROID_HOME/ndk/21.4.7075529" > android/local.properties
+          cat android/local.properties
+
       - name: Build release APK
         working-directory: android
         run: |
