@@ -52,9 +52,13 @@ jobs:
       - name: Install Android platform + build-tools
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager --install "platform-tools" "platforms;android-29" "build-tools;29.0.2"
+          # AGP 3.5.3 (RN 0.63) needs an NDK that still ships the
+          # arm-linux-androideabi toolchains used for symbol stripping; the
+          # runner's preinstalled NDK is far too new.
+          sdkmanager --install "platform-tools" "platforms;android-29" "build-tools;29.0.2" "ndk;21.4.7075529"
           echo "ANDROID_HOME=${ANDROID_HOME}"
           ls "$ANDROID_HOME/build-tools"
+          ls "$ANDROID_HOME/ndk"
 
       # RN 0.63 / AGP 3.5.3 toolchain: Java 8.
       - name: Set up JDK 8
@@ -101,6 +105,9 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/21.4.7075529"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          echo "Using NDK: $ANDROID_NDK_HOME"
           ./gradlew :app:assembleRelease --no-daemon --stacktrace -x lintVitalRelease
 
       - name: Verify and stage APK
