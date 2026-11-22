@@ -143,6 +143,24 @@ def configure_abi_and_repos():
     write(gradle_path, gradle)
     print("app/build.gradle: abiFilters -> arm64-v8a")
 
+    # The APK ships prebuilt .so files from the npm packages; stripping them
+    # needs an NDK whose gcc-era toolchain layout AGP 3.5.3 understands, which
+    # no current NDK provides. Skip stripping entirely.
+    if "doNotStrip" not in gradle:
+        gradle = read(gradle_path)
+        if "    signingConfigs {\n" not in gradle:
+            fail("signingConfigs block not found in app/build.gradle")
+        gradle = gradle.replace(
+            "    signingConfigs {\n",
+            "    packagingOptions {\n"
+            '        doNotStrip "**/*.so"\n'
+            "    }\n"
+            "    signingConfigs {\n",
+            1,
+        )
+        write(gradle_path, gradle)
+        print("app/build.gradle: doNotStrip **/*.so (no NDK symbol stripping)")
+
     # jcenter is read-only/eol; mavenCentral first keeps artifact resolution
     # working when jcenter is unavailable.
     root_gradle = ANDROID / "build.gradle"

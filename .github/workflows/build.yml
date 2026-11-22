@@ -108,6 +108,8 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/21.4.7075529"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           echo "Using NDK: $ANDROID_NDK_HOME"
+          ls "$ANDROID_HOME/ndk" || true
+          ls "$ANDROID_NDK_HOME/toolchains" || true
           ./gradlew :app:assembleRelease --no-daemon --stacktrace -x lintVitalRelease
 
       - name: Verify and stage APK
