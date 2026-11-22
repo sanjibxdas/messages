@@ -1,0 +1,143 @@
+name: Build ARM64 APK
+
+# Standalone release APK for the Expo SDK 39 / React Native 0.63 Messages app.
+# The managed Expo project is ejected to the bare workflow inside the job, so
+# the repository itself stays untouched apart from this workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: arm64-v8a release APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    env:
+      CI: "1"
+      EXPO_NONINTERACTIVE: "1"
+      EXPO_NO_TELEMETRY: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 16
+        uses: actions/setup-node@v4
+        with:
+          node-version: "16"
+
+      # Installed before the JDK 8 switch: current cmdline-tools need Java 11+.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform + build-tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-29" "build-tools;29.0.2"
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          ls "$ANDROID_HOME/build-tools"
+
+      # RN 0.63 / AGP 3.5.3 toolchain: Java 8.
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Restore caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/yarn
+            ~/.npm/_cacache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-expo39-${{ hashFiles('yarn.lock', '.github/workflows/build.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-expo39-
+
+      - name: Install JS dependencies
+        run: |
+          npm install --global yarn@1.22.19 --silent
+          yarn install --frozen-lockfile --network-timeout 600000
+
+      - name: Prepare app config for eject
+        run: python3 .github/scripts/prepare_android.py appconfig
+
+      - name: Generate native Android project (expo eject)
+        run: npx --yes expo-cli@3.28.6 eject --non-interactive --no-install
+
+      - name: Patch generated project (arm64 only, no OTA)
+        run: python3 .github/scripts/prepare_android.py native
+
+      - name: Install dependencies for bare project
+        run: yarn install --ignore-engines --network-timeout 600000
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace -x lintVitalRelease
+
+      - name: Verify and stage APK
+        run: |
+          set -euo pipefail
+          APK=$(find android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -1)
+          test -n "$APK" || { echo "No APK produced"; exit 1; }
+          mkdir -p dist
+          cp "$APK" dist/messages-clone-arm64-v8a.apk
+          python3 - <<'PY'
+          import hashlib, pathlib, zipfile
+          p = pathlib.Path("dist/messages-clone-arm64-v8a.apk")
+          data = p.read_bytes()
+          abis = sorted({n.split("/")[1] for n in zipfile.ZipFile(p).namelist()
+                         if n.startswith("lib/") and n.count("/") >= 2})
+          names = zipfile.ZipFile(p).namelist()
+          print(f"APK: {p} ({len(data)/1048576:.1f} MiB)")
+          print(f"ABIs packaged: {abis}")
+          print(f"JS bundle embedded: {'assets/index.android.bundle' in names}")
+          print(f"sha256: {hashlib.sha256(data).hexdigest()}")
+          assert abis == ["arm64-v8a"], f"unexpected ABIs: {abis}"
+          assert "assets/index.android.bundle" in names, "JS bundle not embedded"
+          PY
+          {
+            echo "### Messages APK (arm64-v8a)"
+            echo ""
+            echo "- ABI: \`arm64-v8a\`"
+            echo "- Size: $(du -h dist/messages-clone-arm64-v8a.apk | cut -f1)"
+            echo "- sha256: \`$(sha256sum dist/messages-clone-arm64-v8a.apk | cut -d' ' -f1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: messages-clone-arm64-v8a
+          path: dist/messages-clone-arm64-v8a.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      # Stable direct download URL:
+      # https://github.com/sanjibxdas/messages/releases/latest/download/messages-clone-arm64-v8a.apk
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Messages APK (arm64-v8a)
+          body: |
+            Sideloadable arm64-v8a release APK built from `${{ github.sha }}`.
+
+            - Build: ${{ github.run_number }}
+            - Variant: release (bundled JS, debug keystore signed)
+            - Install: `adb install -r messages-clone-arm64-v8a.apk`
+          files: dist/messages-clone-arm64-v8a.apk
+          make_latest: true
+          fail_on_unmatched_files: true
