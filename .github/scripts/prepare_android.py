@@ -161,6 +161,20 @@ def configure_abi_and_repos():
         write(gradle_path, gradle)
         print("app/build.gradle: doNotStrip **/*.so (no NDK symbol stripping)")
 
+    # react-native-vector-icons ships its .ttf files inside the npm package; in
+    # the bare workflow they only reach the APK through its fonts.gradle hook.
+    # Without it every icon renders as a blank box.
+    if "react-native-vector-icons/fonts.gradle" not in gradle:
+        gradle = read(gradle_path).rstrip("\n")
+        gradle += (
+            "\n\n// Vector icon fonts (only the sets this app imports).\n"
+            "project.ext.vectoricons = [iconFontNames: "
+            "['FontAwesome.ttf', 'Ionicons.ttf', 'AntDesign.ttf']]\n"
+            'apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")\n'
+        )
+        write(gradle_path, gradle)
+        print("app/build.gradle: react-native-vector-icons fonts.gradle applied")
+
     # jcenter is read-only/eol; mavenCentral first keeps artifact resolution
     # working when jcenter is unavailable.
     root_gradle = ANDROID / "build.gradle"
